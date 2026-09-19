@@ -205,7 +205,8 @@
           method: "POST",
           body: fd,
           headers: { Accept: "application/json" }
-        }).then(function (r) { return r.json(); }).then(function () {
+        }).then(function (r) { return r.json(); }).then(function (data) {
+          if (!data || String(data.success) !== "true") throw new Error("form not accepted");
           if (successBox && successMsg) {
             form.hidden = true;
             successBox.hidden = false;
