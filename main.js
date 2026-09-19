@@ -2,6 +2,151 @@
 (function () {
   "use strict";
 
+  /* ---------- Shared data config (admin-managed content + quote sync) ---------- */
+  var DATA_BASE = "https://harky39.github.io/on-the-spot-data";
+  var SITE_KEY = "van"; // "car" or "van" — which site this is
+  // Fine-grained GitHub token with Contents access to Harky39/on-the-spot-data.
+  // If empty, quotes still arrive by email; the staff panel can set an override (Settings tab).
+  var GITHUB_TOKEN = "";
+
+  function getDataToken() {
+    try { return (localStorage.getItem("otsDataToken") || "").trim() || GITHUB_TOKEN; } catch (_) { return GITHUB_TOKEN; }
+  }
+
+  /* ---------- GitHub Contents API helpers (data repo) ---------- */
+  function ghHeaders() {
+    return {
+      Authorization: "Bearer " + getDataToken(),
+      Accept: "application/vnd.github+json",
+      "Content-Type": "application/json"
+    };
+  }
+
+  // NOTE: the data repo is served by GitHub Pages from its `gh-pages` branch.
+  function ghGet(path) {
+    return fetch("https://api.github.com/repos/Harky39/on-the-spot-data/contents/" + path, { headers: ghHeaders() })
+      .then(function (r) { if (!r.ok) throw new Error("GitHub API " + r.status); return r.json(); });
+  }
+
+  function ghPut(path, base64Content, message, sha) {
+    var body = { message: message, content: base64Content, branch: "gh-pages" };
+    if (sha) body.sha = sha;
+    return fetch("https://api.github.com/repos/Harky39/on-the-spot-data/contents/" + path, {
+      method: "PUT", headers: ghHeaders(), body: JSON.stringify(body)
+    }).then(function (r) { if (!r.ok) throw new Error("GitHub API " + r.status); return r.json(); });
+  }
+
+  function utf8ToBase64(str) { return btoa(unescape(encodeURIComponent(str))); }
+
+  function blobToBase64(blob) {
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function () {
+        try {
+          var bytes = new Uint8Array(reader.result);
+          var binary = "";
+          for (var i = 0; i < bytes.length; i += 0x8000) {
+            binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+          }
+          resolve(btoa(binary));
+        } catch (err) { reject(err); }
+      };
+      reader.onerror = function () { reject(new Error("read failed")); };
+      reader.readAsArrayBuffer(blob);
+    });
+  }
+
+  /* ---------- Save quote + photos to the data repo (staff panel) ---------- */
+  function saveQuoteToDataRepo(fields, photoFiles) {
+    if (!getDataToken()) return Promise.reject(new Error("no data token configured"));
+    var id = "q-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
+    var photos = [];
+
+    function uploadPhoto(file, i) {
+      return blobToBase64(file).then(function (b64) {
+        var path = "quotes/" + id + "/photo-" + (i + 1) + ".jpg";
+        photos.push(path);
+        return ghPut(path, b64, "Add quote photo: " + path);
+      });
+    }
+
+    var chain = Promise.resolve();
+    Array.prototype.slice.call(photoFiles || []).slice(0, 4).forEach(function (f, i) {
+      chain = chain.then(function () { return uploadPhoto(f, i); });
+    });
+
+    return chain.then(function () {
+      var quote = {
+        id: id, site: SITE_KEY, name: fields.name, phone: fields.phone, type: fields.type,
+        message: fields.message || "", photos: photos,
+        createdAt: new Date().toISOString(), status: "new"
+      };
+      return ghPut("quotes/" + id + ".json", utf8ToBase64(JSON.stringify(quote, null, 2)), "Add quote: " + id)
+        .then(function () { return updateQuoteIndex(quote); });
+    });
+  }
+
+  function updateQuoteIndex(quote) {
+    return ghGet("quotes/index.json").then(function (fileData) {
+      var list = [];
+      try { list = JSON.parse(atob(fileData.content)) || []; } catch (_) {}
+      if (!Array.isArray(list)) list = [];
+      list.unshift({
+        id: quote.id, site: quote.site, name: quote.name, phone: quote.phone,
+        type: quote.type, createdAt: quote.createdAt, photoCount: quote.photos.length, status: "new"
+      });
+      return ghPut("quotes/index.json", utf8ToBase64(JSON.stringify(list, null, 2)), "Add quote to index: " + quote.id, fileData.sha);
+    });
+  }
+
+  /* ---------- Load admin-managed content (showcase + gallery) ---------- */
+  function renderGallery(items) {
+    var grid = document.getElementById("galleryGrid");
+    var title = document.getElementById("galleryTitle");
+    if (!grid) return;
+    grid.innerHTML = "";
+    items.forEach(function (item) {
+      if (!item || !item.image) return;
+      var fig = document.createElement("figure");
+      fig.className = "gallery-card";
+      var chipText = item.chip === "Before" ? "Before" : item.chip === "After" ? "After" : "In progress";
+      var chipClass = item.chip === "Before" ? "chip-before" : item.chip === "After" ? "chip-after" : "chip-progress";
+      var chip = document.createElement("span");
+      chip.className = "chip " + chipClass;
+      chip.setAttribute("aria-hidden", "true");
+      chip.textContent = chipText;
+      var img = document.createElement("img");
+      img.src = item.image;
+      img.alt = item.caption || "Workshop photo";
+      img.loading = "lazy";
+      var cap = document.createElement("figcaption");
+      cap.textContent = item.caption || "";
+      fig.appendChild(chip);
+      fig.appendChild(img);
+      if (item.caption) fig.appendChild(cap);
+      grid.appendChild(fig);
+    });
+    if (title) title.hidden = items.length === 0;
+    grid.style.display = items.length ? "" : "none";
+  }
+
+  function applyContent(data) {
+    if (!data || typeof data !== "object") return;
+    var sc = data.showcase;
+    if (sc && document.getElementById("baSlider")) {
+      var imgs = document.querySelectorAll("#baSlider img");
+      // first <img> is the after shot, second (.ba-before) is the before shot
+      if (sc.after && imgs[0]) { imgs[0].src = sc.after; }
+      if (sc.before && imgs[1]) { imgs[1].src = sc.before; }
+    }
+    if (Array.isArray(data.gallery)) renderGallery(data.gallery);
+  }
+
+  fetch(DATA_BASE + "/" + SITE_KEY + "/content.json", { cache: "no-store" })
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(applyContent)
+    .catch(function () { /* keep the built-in content if the data site is unreachable */ });
+
   /* ---------- Sticky header shadow ---------- */
   var header = document.getElementById("siteHeader");
   function onScroll() {
@@ -217,6 +362,12 @@
               : "Thanks " + name + " — we've got your details and will get back to you with a quote shortly.";
             successBox.scrollIntoView({ behavior: "smooth", block: "center" });
           }
+
+          // Best-effort copy for the staff panel (the email above is primary).
+          saveQuoteToDataRepo(
+            { name: name, phone: phone, type: type, message: message },
+            compressed
+          ).catch(function (err) { console.warn("Quote not saved to data repo:", err && err.message); });
         }).catch(function () {
           resetBtn();
           fallbackMailto("We couldn't reach the online form, so we've opened your email app instead — attach photos there if you like.");
@@ -324,8 +475,8 @@
       estPrice.textContent = gbp(lo) + " \u2013 " + gbp(hi);
 
       var notes = [];
-      if (estVehicle.value === "static") notes.push("Static caravans are larger — expect the higher end of each range.");
-      if (!cfg.noPanels && estPanels && estPanels.value === "3") notes.push("For three or more areas we'll always confirm by phone — treat this as a ballpark only.");
+      if (estVehicle.value === "van") notes.push("Vans & 4x4s are priced towards the higher end of each range.");
+      if (!cfg.noPanels && estPanels && estPanels.value === "3") notes.push("For three or more panels we'll always confirm by phone — treat this as a ballpark only.");
       notes.push("Includes repair, preparation and colour-matched respray. Most jobs are done on site in half a day to two days (paint needs time to cure).");
       estNote.textContent = notes.join(" ");
     }
