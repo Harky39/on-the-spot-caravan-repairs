@@ -798,6 +798,9 @@ a.info-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-sm); }
   gap: 16px;
   margin-bottom: 48px;
 }
+/* Long unbreakable strings must never blow out the grid tracks */
+.gallery-grid > * { min-width: 0; }
+.gallery-card figcaption { overflow-wrap: anywhere; }
 .gallery-card {
   position: relative;
   background: rgba(255, 255, 255, 0.06);
