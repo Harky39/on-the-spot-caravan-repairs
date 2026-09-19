@@ -160,9 +160,28 @@
     if (Array.isArray(data.gallery)) renderGallery(data.gallery);
   }
 
+  /* ---------- Site theme (chosen in the staff panel, stored in content.json) ---------- */
+  var SITE_THEMES = ["bold-studio", "editorial", "bento", "retro-garage", "mono-minimal", "split-sidebar", "soft-pastel", "noir-luxury", "performance"];
+
+  function applySiteTheme(id) {
+    var old = document.getElementById("siteThemeCss");
+    if (old && old.parentNode) old.parentNode.removeChild(old);
+    // "classic" (or nothing set) means the built-in style.css look.
+    if (!id || id === "classic") return;
+    if (SITE_THEMES.indexOf(id) === -1) return;
+    var link = document.createElement("link");
+    link.id = "siteThemeCss";
+    link.rel = "stylesheet";
+    link.href = "themes/" + id + ".css";
+    document.head.appendChild(link);
+  }
+
   fetch(DATA_BASE + "/" + SITE_KEY + "/content.json", { cache: "no-store" })
     .then(function (r) { return r.ok ? r.json() : null; })
-    .then(applyContent)
+    .then(function (data) {
+      applyContent(data);
+      if (data && typeof data === "object") applySiteTheme(data.theme);
+    })
     .catch(function () { /* keep the built-in content if the data site is unreachable */ });
 
   /* ---------- Sticky header shadow ---------- */
