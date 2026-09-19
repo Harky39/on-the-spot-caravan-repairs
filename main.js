@@ -9,9 +9,23 @@
   // If empty, quotes still arrive by email; the staff panel can set an override (Settings tab).
   var GITHUB_TOKEN = "";
 
+  var REMOTE_CONFIG = null; // loaded from the data site (published by the staff panel)
+
   function getDataToken() {
-    try { return (localStorage.getItem("otsDataToken") || "").trim() || GITHUB_TOKEN; } catch (_) { return GITHUB_TOKEN; }
+    try {
+      var local = (localStorage.getItem("otsDataToken") || "").trim();
+      if (local) return local;
+    } catch (_) {}
+    if (REMOTE_CONFIG && REMOTE_CONFIG.token) return String(REMOTE_CONFIG.token).trim();
+    return GITHUB_TOKEN;
   }
+
+  // The staff panel publishes the data token here, so quote submissions can be filed
+  // in the shared data repo without redeploying this site.
+  fetch(DATA_BASE + "/config.json", { cache: "no-store" })
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (cfg) { if (cfg && typeof cfg === "object") REMOTE_CONFIG = cfg; })
+    .catch(function () {});
 
   /* ---------- GitHub Contents API helpers (data repo) ---------- */
   function ghHeaders() {
