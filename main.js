@@ -28,7 +28,7 @@
   // in the shared data repo without redeploying this site.
   fetch(DATA_BASE + "/config.json", { cache: "no-store" })
     .then(function (r) { return r.ok ? r.json() : null; })
-    .then(function (cfg) { if (cfg && typeof cfg === "object") REMOTE_CONFIG = cfg; })
+    .then(function (cfg) { if (cfg && typeof cfg === "object") REMOTE_CONFIG = cfg; trackVisit(); })
     .catch(function () {});
 
   /* ---------- GitHub Contents API helpers (data repo) ---------- */
@@ -74,7 +74,29 @@
     });
   }
 
-  /* ---------- Save quote + photos to the data repo (staff panel) ---------- */
+  /* ---------- Unique visit counter (first visit per browser, anonymous) ---------- */
+  function localDateStr(d) {
+    var p = function (n) { return (n < 10 ? "0" : "") + n; };
+    return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
+  }
+
+  function trackVisit() {
+    var key = "otsVisited_" + SITE_KEY;
+    var first = false;
+    try {
+      if (!localStorage.getItem(key)) { localStorage.setItem(key, new Date().toISOString()); first = true; };
+    } catch (_) {}
+    // Count each browser only once; skip silently when no token is available.
+    if (!first || !getDataToken()) return;
+
+    var now = new Date();
+    var id = localDateStr(now) + "_" + now.toTimeString().slice(0, 8).replace(/:/g, "") + "_" + Math.random().toString(36).slice(2, 8);
+    ghPut("visits/" + SITE_KEY + "/" + id + ".json",
+      utf8ToBase64(JSON.stringify({ site: SITE_KEY, at: now.toISOString() })),
+      "Visit " + SITE_KEY + " " + id
+    ).catch(function () {}); // fire and forget — never block or alert the visitor
+  }
+/* ---------- Save quote + photos to the data repo (staff panel) ---------- */
   function saveQuoteToDataRepo(fields, photoFiles) {
     if (!getDataToken()) return Promise.reject(new Error("no data token configured"));
     var id = "q-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
