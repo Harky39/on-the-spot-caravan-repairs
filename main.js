@@ -87,7 +87,10 @@
       if (!localStorage.getItem(key)) { localStorage.setItem(key, new Date().toISOString()); first = true; };
     } catch (_) {}
     // Count each browser only once; skip silently when no token is available.
-    if (!first || !getDataToken()) return;
+    // Only count visitors who accepted the privacy note (proper consent).
+    var consent = "";
+    try { consent = localStorage.getItem("otsConsent") || ""; } catch (_) {}
+    if (!first || !getDataToken() || consent !== "accepted") return;
 
     var now = new Date();
     var id = localDateStr(now) + "_" + now.toTimeString().slice(0, 8).replace(/:/g, "") + "_" + Math.random().toString(36).slice(2, 8);
@@ -96,6 +99,25 @@
       "Visit " + SITE_KEY + " " + id
     ).catch(function () {}); // fire and forget — never block or alert the visitor
   }
+  /* ---------- Privacy note banner (asked once per browser) ---------- */
+  function initConsent() {
+    var bar = document.getElementById("consentBar");
+    if (!bar) return;
+    var choice = "";
+    try { choice = localStorage.getItem("otsConsent") || ""; } catch (_) {}
+    if (choice) return; // already answered — keep the page clean
+    bar.hidden = false;
+    function done(v) {
+      try { localStorage.setItem("otsConsent", v); } catch (_) {}
+      bar.hidden = true;
+    }
+    var acc = document.getElementById("consentAccept");
+    var dec = document.getElementById("consentDecline");
+    if (acc) acc.addEventListener("click", function () { done("accepted"); });
+    if (dec) dec.addEventListener("click", function () { done("declined"); });
+  }
+  initConsent();
+
 /* ---------- Save quote + photos to the data repo (staff panel) ---------- */
   function saveQuoteToDataRepo(fields, photoFiles) {
     if (!getDataToken()) return Promise.reject(new Error("no data token configured"));
